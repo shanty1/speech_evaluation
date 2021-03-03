@@ -50,42 +50,34 @@ def main(args):
     decoder.load_state_dict(torch.load(args.decoder_path))
 
 
-    for count in range(1,2,1):
-        x.append(count)
-        start = time.perf_counter()
-        j = 0
-        while j < count:
-            j+=1
-            i = random.randint(1,1)
-            args.audio='./data/audio/swz{}.wav'.format(i)
-            # Prepare an image
-            audio = get_audio_fea(args.audio)
-            audio = torch.tensor(audio).unsqueeze(0).to(device)
+    for j in range(80,101,1):
+        args.audio='./data/audio/swz{}.wav'.format(j)
+        # Prepare an image
+        audio = get_audio_fea(args.audio)
+        audio = torch.tensor(audio).unsqueeze(0).to(device)
 
-            # Generate an caption from the image
-            feature = encoder(audio,[audio.shape[1]])
-            if (Z_DIM > 0):
-                z = Variable(torch.randn(feature.shape[0], Z_DIM)).to(device)
-                feature = torch.cat([z,feature],1)
-            comment = torch.tensor([vocab("<start>")]).to(device)
-            sampled_ids = decoder.sample(feature,comment)
-            sampled_ids = sampled_ids[0].cpu().numpy()          # (1, max_seq_length) -> (max_seq_length)
+        # Generate an caption from the image
+        feature = encoder(audio,[audio.shape[1]])
+        if (Z_DIM > 0):
+            z = Variable(torch.randn(feature.shape[0], Z_DIM)).to(device)
+            feature = torch.cat([z,feature],1)
+        comment = torch.tensor([vocab("<start>")]).to(device)
+        sampled_ids = decoder.sample(feature,comment)
+        sampled_ids = sampled_ids[0].cpu().numpy()          # (1, max_seq_length) -> (max_seq_length)
 
-            # Convert word_ids to words
-            sampled_caption = []
-            for word_id in sampled_ids:
-                word = vocab.idx2word[word_id]
-                sampled_caption.append(word)
-                if word == '<end>':
-                    break
-            sentence = ' '.join(sampled_caption)
+        # Convert word_ids to words
+        sampled_caption = []
+        for word_id in sampled_ids:
+            word = vocab.idx2word[word_id]
+            sampled_caption.append(word)
+            if word == '<end>':
+                break
+        sentence = ' '.join(sampled_caption)
 
-            # Print out the image and the generated caption
-            sentence = sentence.replace('<start>','').replace('<unk>','，').replace('<end>','').replace(' ','')
-            print(sentence)
+        # Print out the image and the generated caption
+        sentence = sentence.replace('<start>','').replace('<unk>','，').replace('<end>','').replace(' ','')
+        print(str(j)+".",sentence)
 
-        end = time.perf_counter()
-        y.append(end - start)
 
 if __name__ == '__main__':
     # for i in range(1,101):
@@ -95,8 +87,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # print(i,end='. ')
     parser.add_argument('--audio', type=str, default='./data/audio/swz{}.wav'.format(i), help='test audio path') #110-30  300-30-15   300-90(90-1全拟合)
-    parser.add_argument('--encoder_path', type=str, default='./models/lstmCell-encoder--100-1.ckpt', help='path for trained encoder')
-    parser.add_argument('--decoder_path', type=str, default='./models/lstmCell-decoder--100-1.ckpt', help='path for trained decoder')
+    parser.add_argument('--encoder_path', type=str, default='./models/lstmCell-encoder-5800-270.ckpt', help='path for trained encoder')
+    parser.add_argument('--decoder_path', type=str, default='./models/lstmCell-decoder-5800-270.ckpt', help='path for trained decoder')
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='path for vocabulary wrapper')
 
     # Model parameters (should be same as paramters in train.py)
@@ -112,11 +104,3 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     main(args)
-
-    plt.plot(sorted(x), y,'r')
-    plt.show()
-
-    i = 0
-    while i < len(x):
-        print(x[i],'\t',y[i])
-        i+=1
