@@ -6,7 +6,7 @@ import os
 from torchvision import transforms
 from build_vocab import Vocabulary
 import matplotlib.pyplot as plt
-from model import EncoderRNN, DecoderRNN
+from model import EncoderRNN, DecoderRNN, DecoderRNN_LSTMCell
 from audio_pre import audio_pad_pack, audio_mfcc
 import numpy as np
 from torch.autograd import Variable
@@ -39,7 +39,7 @@ def main(args):
 
     # Build models
     encoder = EncoderRNN(mfcc_dim, args.embed_size, args.hidden_size).to(device)
-    decoder = DecoderRNN(args.embed_size + Z_DIM, args.hidden_size, len(vocab), vocab('<pad>'), args.num_layers).to(
+    decoder = DecoderRNN_LSTMCell(args.embed_size + Z_DIM, args.hidden_size, len(vocab), vocab('<pad>'), args.num_layers).to(
         device)
     # decoder = DecoderRNN(args.embed_size, args.hidden_size, len(vocab), args.num_layers)
     encoder = encoder.to(device)
@@ -95,8 +95,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # print(i,end='. ')
     parser.add_argument('--audio', type=str, default='./data/audio/swz{}.wav'.format(i), help='test audio path') #110-30  300-30-15   300-90(90-1全拟合)
-    parser.add_argument('--encoder_path', type=str, default='./models/encoder-1100-1.ckpt', help='path for trained encoder')
-    parser.add_argument('--decoder_path', type=str, default='./models/decoder-1100-1.ckpt', help='path for trained decoder')
+    parser.add_argument('--encoder_path', type=str, default='./models/lstmCell-encoder--100-1.ckpt', help='path for trained encoder')
+    parser.add_argument('--decoder_path', type=str, default='./models/lstmCell-decoder--100-1.ckpt', help='path for trained decoder')
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='path for vocabulary wrapper')
 
     # Model parameters (should be same as paramters in train.py)

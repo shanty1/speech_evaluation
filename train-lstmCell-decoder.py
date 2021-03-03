@@ -9,7 +9,7 @@ import pickle
 from data_loader import caculate_max_len 
 from data_loader import data_get 
 from build_vocab import Vocabulary
-from model import EncoderRNN, DecoderRNN
+from model import EncoderRNN, DecoderRNN, DecoderRNN_SAME_INPUT, DecoderRNN_LSTMCell
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torchvision import transforms
 from audio_pre import audio_preprocess
@@ -46,7 +46,7 @@ def main(args):
 
     # Build the models
     encoder = EncoderRNN(mfcc_dim, args.embed_size, args.hidden_size).to(device)
-    decoder = DecoderRNN(args.embed_size+Z_DIM, args.hidden_size, len(vocab), vocab('<pad>'), args.num_layers).to(device)
+    decoder = DecoderRNN_LSTMCell(args.embed_size+Z_DIM, args.hidden_size, len(vocab), vocab('<pad>'), args.num_layers).to(device)
     # decoder = DecoderRNN(args.embed_size, args.hidden_size, len(vocab), args.num_layers).to(device)
 
     # Loss and optimizer
@@ -88,11 +88,7 @@ def main(args):
             if(Z_DIM>0):
                 z = Variable(torch.randn(audio_features.shape[0], Z_DIM)).to(device)
                 audio_features = torch.cat([z,audio_features],1)
-            # outputs = decoder(audio_features, batch_comment, comment_len_list)
-            comment = torch.tensor([vocab("<start>")]).to(device)
-            outputs = decoder(audio_features, comment, comment_len_list)
-            # _, predicted = outputs.max(2)
-            # print(predicted)
+            outputs = decoder(audio_features, batch_comment, comment_len_list)
             loss = criterion(outputs.view(-1,outputs.shape[-1]), targets.view(-1))
             optimizer.zero_grad()
             loss.backward()
@@ -105,9 +101,9 @@ def main(args):
             # Save the model checkpoints
         if (epoch+1) % args.save_step == 0:
             torch.save(decoder.state_dict(), os.path.join(
-                args.model_path, 'decoder-{}-{}.ckpt'.format(epoch+1, i+1)))
+                args.model_path, 'lstmCell-decoder-{}-{}.ckpt'.format(epoch+1, i+1)))
             torch.save(encoder.state_dict(), os.path.join(
-                args.model_path, 'encoder-{}-{}.ckpt'.format(epoch+1, i+1)))
+                args.model_path, 'lstmCell-encoder-{}-{}.ckpt'.format(epoch+1, i+1)))
 
 
 if __name__ == '__main__':
@@ -127,7 +123,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_layers', type=int , default=1, help='number of layers in lstm')
     
     parser.add_argument('--num_epochs', type=int, default=10000)
-    parser.add_argument('--batch_size', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=10)
     parser.add_argument('--learning_rate', type=float, default=0.001)
 
     parser.add_argument('--encoder_path', type=str, default='./models/encoder-1100-1.ckpt',

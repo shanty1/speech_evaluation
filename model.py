@@ -75,7 +75,7 @@ class DecoderRNN(nn.Module):
         self.max_seg_length = max_seq_length
         self.num_layers = num_layers
         
-    def forward(self, features, captions, lengths):
+    def forward1(self, features, captions, lengths):
         """Decode image feature vectors and generates captions."""
         embeddings = self.embed(captions)
         h0 = features.unsqueeze(0).repeat(1,self.num_layers,1)
@@ -85,18 +85,105 @@ class DecoderRNN(nn.Module):
         out, _ = self.lstm(packed,(h0,c0))
         out = pad_packed_sequence(out, batch_first=True)[0]
         outputs = self.linear(out)
-        return outputs 
-    
-    def sample(self, features, states=None):
+        return outputs
+
+    # 此处只支持一条一条训练，即batchsize为1
+    def forward(self, features, captions, lengths):
+        h0 = features.unsqueeze(0).repeat(1, self.num_layers, 1)
+        c0 = features.unsqueeze(0).repeat(1, self.num_layers, 1)
+        states = (h0, c0)
+        embeddings = self.embed(captions).unsqueeze(0)
+        result = None
+        for i in range(lengths[0]):
+            out, states = self.lstm(embeddings, states)  # hiddens: (batch_size, 1, hidden_size)
+            outputs = self.linear(out.squeeze(1))  # outputs:  (batch_size, vocab_size)
+            _, predicted = outputs.max(1)  # predicted: (batch_size)
+            if i==0:
+                result = outputs
+            else:
+                result = torch.cat((result, outputs), 0)
+            embeddings = self.embed(predicted).unsqueeze(0)  # inputs: (batch_size, embed_size)
+        return result.unsqueeze(0)
+
+    def sample(self, features,captions, states=None):
         """Generate captions for given image features using greedy search."""
+        h0 = features.unsqueeze(0).repeat(1, self.num_layers, 1)
+        c0 = features.unsqueeze(0).repeat(1, self.num_layers, 1)
+        states = (h0, c0)
+        embeddings = self.embed(captions).unsqueeze(0)
         sampled_ids = []
-        inputs = features.unsqueeze(1).to(device)
         for i in range(self.max_seg_length):
-            hiddens, states = self.lstm(inputs, states)          # hiddens: (batch_size, 1, hidden_size)
-            outputs = self.linear(hiddens.squeeze(1))            # outputs:  (batch_size, vocab_size)
+            out, states = self.lstm(embeddings, states)          # hiddens: (batch_size, 1, hidden_size)
+            outputs = self.linear(out.squeeze(1))            # outputs:  (batch_size, vocab_size)
             _, predicted = outputs.max(1)                        # predicted: (batch_size)
             sampled_ids.append(predicted)
-            inputs = self.embed(predicted)                       # inputs: (batch_size, embed_size)
-            inputs = inputs.unsqueeze(1)                         # inputs: (batch_size, 1, embed_size)
+            embeddings = self.embed(predicted).unsqueeze(0)                     # inputs: (batch_size, embed_size)
         sampled_ids = torch.stack(sampled_ids, 1)                # sampled_ids: (batch_size, max_seq_length)
         return sampled_ids
+
+class DecoderRNN_LSTMCell(nn.Module):
+    def __init__(self, embed_size, hidden_size, vocab_size, padding_idx, num_layers, max_seq_length=50):
+        """Set the hyper-parameters and build the layers."""
+        super(DecoderRNN_LSTMCell, self).__init__()
+        self.embed = nn.Embedding(vocab_size, embed_size, padding_idx)
+        self.lstm = nn.LSTMCell(embed_size, hidden_size)
+        self.outLayer = nn.Linear(hidden_size, embed_size)
+        self.linear = nn.Linear(hidden_size, vocab_size)
+        self.max_seg_length = max_seq_length
+        self.num_layers = num_layers
+
+    # 代码只支持单层lstm
+    def forward(self, features, captions, lengths):
+        states = (features, features)
+        # 只保留<start>
+        embeddings = self.embed(captions[...,:1].squeeze(1))
+        result = None
+        for i in range(max(lengths)):
+            states = self.lstm(embeddings, states)
+            # out = self.outLayer(states[0])
+            outputs = self.linear(states[0])  # outputs:  (batch_size, vocab_size)
+            _, predicted = outputs.max(1)  # predicted: (batch_size)
+            if i == 0:
+                result = outputs.unsqueeze(1)
+            else:
+                result = torch.cat((result, outputs.unsqueeze(1)), 1)
+            embeddings = self.embed(predicted)  # inputs: (batch_size, embed_size)
+        return result
+
+    def sample(self, features, captions, states=None):
+        """Generate captions for given image features using greedy search."""
+        states = (features, features)
+        embeddings = self.embed(captions)
+        sampled_ids = []
+        for i in range(self.max_seg_length):
+            states = self.lstm(embeddings, states)  # hiddens: (batch_size, 1, hidden_size)
+            outputs = self.linear(states[0])  # outputs:  (batch_size, vocab_size)
+            _, predicted = outputs.max(1)  # predicted: (batch_size)
+            sampled_ids.append(predicted)
+            embeddings = self.embed(predicted)  # inputs: (batch_size, embed_size)
+        sampled_ids = torch.stack(sampled_ids, 1)  # sampled_ids: (batch_size, max_seq_length)
+        return sampled_ids
+
+class DecoderRNN_SAME_INPUT(nn.Module):
+    def __init__(self, embed_size, hidden_size, vocab_size, padding_idx, num_layers, max_seq_length=50):
+        """Set the hyper-parameters and build the layers."""
+        super(DecoderRNN_SAME_INPUT, self).__init__()
+        self.embed = nn.Embedding(vocab_size, embed_size, padding_idx)
+        self.lstm = nn.LSTM(hidden_size, hidden_size*2, num_layers, batch_first=True, dropout=0.2)
+        self.linear = nn.Linear(hidden_size*2, vocab_size)
+        self.max_seg_length = max_seq_length
+        self.num_layers = num_layers
+
+    def forward(self, features, captions, lengths):
+        """Decode image feature vectors and generates captions."""
+        features = features.unsqueeze(1).repeat(1, max(lengths), 1)
+        out, _ = self.lstm(features)
+        outputs = self.linear(out)
+        return outputs
+
+    def sample(self, features, captions, states=None):
+        features = features.unsqueeze(0).repeat(1, self.max_seg_length, 1)
+        out, _ = self.lstm(features)
+        outputs = self.linear(out)
+        _, predicted = outputs.max(2)  # predicted: (batch_size)
+        return predicted
