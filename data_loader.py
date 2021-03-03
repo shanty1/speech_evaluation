@@ -20,6 +20,7 @@ def caculate_max_len(audio_dir,text_file,vocab):
     document_text = open(text_file, 'r',encoding='UTF-8').read()
     comment_list = document_text.split('\n')
     for comment in comment_list:
+        if not comment.strip(): continue
         comment_features.append(get_comment_fea(comment,vocab))
     mfcc_lengths = [len(item) for item in mfcc_features]
     comment_lengths = [len(item) for item in comment_features]
@@ -56,10 +57,11 @@ def data_get(audio_dir,audio_max_len, text_path, comment_max_len, vocab):
     texts = text.split('\n')
     data_list = []
     for comment in texts:
+        if not comment.strip(): continue
         # 编号，如 1.1
         i = comment[:comment.index(' ')]
         if int(i[:i.index('.')]) > 90:
-            continue
+            break
         # 评论文本内容
         content = comment[comment.index(' ')+1:]
         print(i,'：',   content)

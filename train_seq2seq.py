@@ -1,0 +1,157 @@
+import argparse
+import torch
+import torch.nn as nn
+from torch.autograd import Variable
+import numpy as np
+import os
+import pickle
+
+from data_loader import caculate_max_len
+from data_loader import data_get
+from build_vocab import Vocabulary
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from torchvision import transforms
+from audio_pre import audio_preprocess
+import random
+from models import EncoderRNN, DecoderRNN
+from models.attention import Attention
+from models.seq2seq import Seq2seq
+
+
+Z_DIM = 0  # 20
+
+# Device configuration
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+def main(args):
+    # random set
+    manualSeed = 1
+    # print("Random Seed: ", manualSeed)
+    random.seed(manualSeed)
+    torch.manual_seed(manualSeed)
+    torch.cuda.manual_seed_all(manualSeed)
+
+    # Create model directory
+    if not os.path.exists(args.model_path):
+        os.makedirs(args.model_path)
+
+    # Load vocabulary wrapper
+    with open(args.vocab_path, 'rb') as f:
+        vocab = pickle.load(f)
+
+    audio_len, comment_len, mfcc_dim = caculate_max_len(args.audio_dir, args.text_path, vocab)
+    # mfcc_features = audio_preprocess(args.audio_dir, N, AUDIO_LEN, MFCC_DIM).astype(np.float32)
+
+    # Build data loader
+    data_loader = data_get(args.audio_dir, audio_len, args.text_path, comment_len, vocab)
+
+    # Build the models
+    encoder = EncoderRNN(max_len=audio_len, input_size=mfcc_dim, hidden_size=args.hidden_size,
+                 input_dropout_p=0, dropout_p=0,
+                 n_layers=args.num_layers, bidirectional=False, rnn_cell='gru', variable_lengths=True,
+                 embedding=None, update_embedding=True)
+    decoder = DecoderRNN(vocab_size=len(vocab), max_len=comment_len, hidden_size=args.hidden_size,
+            sos_id=vocab('<start>'), eos_id=vocab('<end>'),
+            n_layers=args.num_layers, rnn_cell='gru', bidirectional=False,
+            input_dropout_p=0, dropout_p=0, use_attention=True)
+    seq_model = Seq2seq(encoder, decoder)
+
+    # Loss and optimizer
+    criterion = nn.NLLLoss()
+    optimizer = torch.optim.Adam(seq_model.parameters(), lr=args.learning_rate)
+
+    # Train the models
+    total_step = len(data_loader)
+    batchSize = args.batch_size
+    for epoch in range(args.num_epochs):
+        j = 0
+        batch_audio = []
+        audio_len_list = []
+        batch_comment = []
+        comment_len_list = []
+        for i, ((audio, audio_len), (comment, comment_len)) in enumerate(data_loader):
+            if j == batchSize:
+                j = 0
+                batch_audio = []
+                audio_len_list = []
+                batch_comment = []
+                comment_len_list = []
+            batch_audio.append(audio)
+            audio_len_list.append(audio_len)
+            batch_comment.append(comment)
+            comment_len_list.append(comment_len)
+            j += 1
+            if i < total_step - 1 and j < batchSize:
+                continue
+            batch_audio = torch.tensor(batch_audio).to(device)
+            batch_comment = torch.tensor(batch_comment).long().to(device)
+
+            targets = pad_packed_sequence(
+                pack_padded_sequence(batch_comment, comment_len_list, batch_first=True, enforce_sorted=False),
+                batch_first=True)[0]
+
+            '''
+            audio_features = encoder(batch_audio, audio_len_list)
+            if (Z_DIM > 0):
+                z = Variable(torch.randn(audio_features.shape[0], Z_DIM)).to(device)
+                audio_features = torch.cat([z, audio_features], 1)
+            # outputs = decoder(audio_features, batch_comment, comment_len_list)
+            comment = torch.tensor([vocab("<start>")]).to(device)
+            outputs = decoder(audio_features, comment, comment_len_list)
+            # _, predicted = outputs.max(2)
+            # print(predicted)
+            '''
+
+            # Forward, backward and optimize :如果不使用teacher forcing，输出序列长度为所有最长序列长度，而不是一个批次的最长，target_variable就不能用packed后的结果，应该用原始batch_comment
+            outputs, hidden, ret_dict = seq_model(input_variable=batch_audio, input_lengths=audio_len_list, target_variable=targets,
+                teacher_forcing_ratio=0.5)
+            loss = 0
+            for step, step_output in enumerate(outputs):
+                batch_size = targets.size(0)
+                loss += criterion(step_output.contiguous().view(batch_size, -1), targets[:, step + 1])
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # Print log info
+            if i % args.log_step == 0:
+                print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Perplexity: {:5.4f}'.format(epoch, args.num_epochs, i,
+                                                                                              total_step, loss.item(),
+                                                                                              np.exp(loss.item())))
+
+            # Save the model checkpoints
+        if (epoch + 1) % args.save_step == 0:
+            torch.save(decoder.state_dict(), os.path.join(
+                args.model_path, 'decoder-{}-{}.ckpt'.format(epoch + 1, i + 1)))
+            torch.save(encoder.state_dict(), os.path.join(
+                args.model_path, 'encoder-{}-{}.ckpt'.format(epoch + 1, i + 1)))
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_path', type=str, default='ckpt/', help='path for saving trained models')
+    parser.add_argument('--crop_size', type=int, default=224, help='size for randomly cropping images')
+    parser.add_argument('--vocab_path', type=str, default='./data/vocab.pkl', help='path for vocabulary wrapper')
+    parser.add_argument('--audio_dir', type=str, default='./data/audio/', help='directory for audioes')
+    parser.add_argument('--text_path', type=str, default='./data/comment/comment.txt', help='path for comment text')
+    parser.add_argument('--log_step', type=int, default=1, help='step size for prining log info')
+    parser.add_argument('--save_step', type=int, default=100, help='step size for saving trained models')
+
+    # Model parameters
+    parser.add_argument('--embed_size', type=int, default=256, help='dimension of word embedding vectors')
+    parser.add_argument('--hidden_size', type=int, default=512, help='dimension of lstm hidden states')
+    parser.add_argument('--num_layers', type=int, default=1, help='number of layers in lstm')
+
+    parser.add_argument('--num_epochs', type=int, default=10000)
+    parser.add_argument('--batch_size', type=int, default=20)
+    parser.add_argument('--learning_rate', type=float, default=0.001)
+
+    parser.add_argument('--encoder_path', type=str, default='./models/encoder-1100-1.ckpt',
+                        help='path for trained encoder')
+    parser.add_argument('--decoder_path', type=str, default='./models/decoder-1100-1.ckpt',
+                        help='path for trained decoder')
+
+    args = parser.parse_args()
+    print(args)
+    main(args)

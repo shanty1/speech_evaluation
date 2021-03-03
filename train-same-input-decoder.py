@@ -109,7 +109,7 @@ def main(args):
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_path', type=str, default='models/' , help='path for saving trained models')
+    parser.add_argument('--model_path', type=str, default='ckpt/' , help='path for saving trained models')
     parser.add_argument('--crop_size', type=int, default=224 , help='size for randomly cropping images')
     parser.add_argument('--vocab_path', type=str, default='./data/vocab.pkl', help='path for vocabulary wrapper')
     parser.add_argument('--audio_dir', type=str, default='./data/audio/', help='directory for audioes')
