@@ -49,7 +49,7 @@ This  model is based on the neural audio caption method. The basic idea of the m
 * STEP 4. Train the model
 
 ```
-#python3 train.py
+#python3 train_seq2seq.py （加入注意力机制和可选择的belt）
 ```
 
 
